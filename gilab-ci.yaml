@@ -1,0 +1,46 @@
+stages:
+  - lint
+  - test
+  - deploy_staging
+  - deploy_prod
+
+variables:
+  FLYWAY_CONF: "flyway.conf"
+
+lint_sql:
+  stage: lint
+  image: python:3.11
+  script:
+    - pip install sqlfluff
+    - sqlfluff lint migrations/*.sql || true
+    - ./scripts/static_sql_checks.sh migrations/*.sql
+
+test_migrations:
+  stage: test
+  image: maven:3.8-jdk-11
+  services: []
+  script:
+    - ./scripts/spawn_ephemeral_db.sh  # create ephemeral test DB (or use shared dev)
+    - flyway -configFiles=$FLYWAY_CONF migrate
+    - ./scripts/run_integration_tests.sh
+  artifacts:
+    when: always
+    paths: [reports/]
+
+deploy_staging:
+  stage: deploy_staging
+  image: flyway/flyway:8
+  script:
+    - flyway -configFiles=$FLYWAY_CONF -locations=filesystem:migrations migrate
+
+deploy_production:
+  stage: deploy_prod
+  image: flyway/flyway:8
+  when: manual
+  only:
+    - main
+  script:
+    - echo "Manual approval required. Running migrations to production."
+    - flyway -configFiles=$FLYWAY_CONF -locations=filesystem:migrations migrate
+  environment:
+    name: production
